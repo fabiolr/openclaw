@@ -18,6 +18,7 @@ import {
   triageMaintenanceRuntimeEntrypoints,
 } from "../../src/infra/triage-runtime.test-support.ts";
 import { nodeHostConfigRuntimeEntrypoint } from "../../src/node-host/config-runtime.test-support.ts";
+import { publishedSdkBridgeEntrypoints } from "../../src/plugins/loader-sdk-bridge-artifacts.test-support.ts";
 import { persistenceRuntimeEntrypoint } from "../../src/skills/library/persistence-runtime.test-support.ts";
 import {
   agentDatabaseHeldRuntimeEntrypoint,
@@ -37,6 +38,7 @@ export const vitestWorkerBuildEntries = {
       codeModeRetentionEntrypoint,
       codeModeDescriptionRetentionEntrypoint,
       ...cliCompactionBackendEntrypoints,
+      ...publishedSdkBridgeEntrypoints,
       ...Object.values(cliRecoveryEntrypoints),
       ...Object.values(gatewayDirectStopEntrypoints),
       ...Object.values(cronOwnerHardeningEntrypoints),
