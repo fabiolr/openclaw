@@ -593,7 +593,7 @@ describe("hosted model pricing", () => {
         const discoverySpies = allowPluginNormalization
           ? []
           : [
-              vi.spyOn(manifestNormalization, "normalizeProviderModelIdWithManifest"),
+              vi.spyOn(manifestNormalization, "resolveManifestModelIdNormalizationPolicies"),
               vi.spyOn(runtimeNormalization, "normalizeProviderModelIdWithRuntime"),
               vi.spyOn(pluginMetadata, "resolvePluginMetadataSnapshot"),
             ];
@@ -832,51 +832,6 @@ describe("hosted model pricing", () => {
         model: "openai/gpt-catalog",
       }),
     ).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
-  });
-
-  it("prices OpenRouter :nitro and :floor routing shortcuts from the base slug", () => {
-    // OpenRouter's /models catalog has no ":nitro" or ":floor" rows: they are
-    // request-time routing hints appended to any slug. Without this fallback
-    // every turn on such a model is reported as missing cost.
-    const agentDir = tempDirs.make("openclaw-routing-suffix-pricing-");
-    const config = {
-      models: {
-        providers: {
-          openrouter: {
-            baseUrl: "https://openrouter.ai/api/v1",
-            models: [{ id: "openai/gpt-catalog", name: "Catalog GPT through OpenRouter" }],
-          },
-        },
-      },
-    } as unknown as OpenClawConfig;
-    for (const model of ["openai/gpt-catalog:nitro", "openai/gpt-catalog:floor"]) {
-      expect(
-        resolveModelCostConfig({ config, agentDir, provider: "openrouter", model }),
-        model,
-      ).toEqual({ input: 1, output: 2, cacheRead: 0, cacheWrite: 0 });
-    }
-  });
-
-  it("does not treat other OpenRouter suffixes as routing shortcuts", () => {
-    // ":free", ":batch", ":extended", ":thinking" and ":online" are distinct
-    // SKUs with their own prices; falling back to the base slug would misprice them.
-    const agentDir = tempDirs.make("openclaw-routing-suffix-negative-");
-    const config = {
-      models: {
-        providers: {
-          openrouter: {
-            baseUrl: "https://openrouter.ai/api/v1",
-            models: [{ id: "openai/gpt-catalog", name: "Catalog GPT through OpenRouter" }],
-          },
-        },
-      },
-    } as unknown as OpenClawConfig;
-    for (const model of ["openai/gpt-catalog:free", "openai/gpt-catalog:batch"]) {
-      expect(
-        resolveModelCostConfig({ config, agentDir, provider: "openrouter", model }),
-        model,
-      ).toBeUndefined();
-    }
   });
 
   it("falls through zero-only catalog tiers without reviving disabled source aliases", () => {

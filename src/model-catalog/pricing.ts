@@ -194,39 +194,10 @@ function isPrivateOrLoopbackUrl(value: string | undefined): boolean {
 }
 
 /** Resolves catalog-first pricing for a key prepared by this metadata context. */
-/**
- * OpenRouter lets callers append a routing shortcut to any model slug:
- * `:nitro` (sort by throughput, priority tier eligible) and `:floor` (sort by
- * price, flex tier eligible). They are request-time hints, not catalog rows —
- * OpenRouter's /models never lists them — so an exact-key lookup finds no price
- * and every turn on such a model is reported as missing cost. Fall back to the
- * base slug's list price, which is the closest published rate. Other suffixes
- * (`:free`, `:batch`, `:extended`, `:thinking`, `:online`) are distinct SKUs
- * with their own prices and are deliberately not stripped.
- */
-const OPENROUTER_ROUTING_SUFFIX = /:(?:nitro|floor)$/u;
-
-function resolveOpenRouterBaseSlugKey(key: string): string | undefined {
-  if (!key.startsWith("openrouter/") || !OPENROUTER_ROUTING_SUFFIX.test(key)) {
-    return undefined;
-  }
-  const base = key.replace(OPENROUTER_ROUTING_SUFFIX, "");
-  return base.length > "openrouter/".length ? base : undefined;
-}
-
 export function resolveModelPricing(
   context: PricingContext,
   key: string,
 ): PricingValue | undefined {
-  const exact = resolveExactModelPricing(context, key);
-  if (exact) {
-    return exact;
-  }
-  const baseKey = resolveOpenRouterBaseSlugKey(key);
-  return baseKey ? resolveExactModelPricing(context, baseKey) : undefined;
-}
-
-function resolveExactModelPricing(context: PricingContext, key: string): PricingValue | undefined {
   const provider = key.slice(0, key.indexOf("/"));
   const providerConfig = context.config.models?.providers?.[provider];
   const configuredModel = providerConfig?.models?.find(
@@ -238,18 +209,27 @@ function resolveExactModelPricing(context: PricingContext, key: string): Pricing
   ) {
     return undefined;
   }
-  const catalog = context.catalog.get(key);
-  if (catalog && hasKnownPricing(catalog)) {
-    return catalog;
-  }
+  // Routing shortcuts inherit an estimate, never the price of a distinct variant.
+  const baseModel = /^openrouter\/([^:]+):(?:nitro|floor)$/u.exec(key)?.[1];
+  const pricingKeys = baseModel ? [key, `openrouter/${baseModel}`] : [key];
   const policy = context.policies.get(provider);
-  if (policy?.external === false) {
-    return undefined;
+  for (const pricingKey of pricingKeys) {
+    const catalog = context.catalog.get(pricingKey);
+    if (catalog && hasKnownPricing(catalog)) {
+      return catalog;
+    }
+    if (policy?.external === false) {
+      return undefined;
+    }
+    const hosted =
+      context.hosted[pricingKey] ?? (policy ? undefined : context.normalizedHosted.get(pricingKey));
+    // The publisher retains validated native zeros under exact owner keys. Catalog
+    // placeholders and normalized aliases cannot establish an authoritative free rate.
+    if (hosted && (hasKnownPricing(hosted) || policy?.authoritative)) {
+      return hosted;
+    }
   }
-  const hosted = context.hosted[key] ?? (policy ? undefined : context.normalizedHosted.get(key));
-  // The publisher retains validated native zeros under exact owner keys. Catalog
-  // placeholders and normalized aliases cannot establish an authoritative free rate.
-  return hosted && (hasKnownPricing(hosted) || policy?.authoritative) ? hosted : undefined;
+  return undefined;
 }
 
 export function modelCatalogPricingFingerprint(context: PricingContext): string {
@@ -263,5 +243,6 @@ export function modelCatalogPricingFingerprint(context: PricingContext): string 
         .map((model) => ({ id: model.id, baseUrl: model.baseUrl }))
         .toSorted((a, b) => a.id.localeCompare(b.id)),
     }));
-  return JSON.stringify({ pricing: context.fingerprint, configuredEndpoints });
+  // Lookup-policy changes must invalidate persisted estimates even when rates are unchanged.
+  return JSON.stringify({ policyVersion: 2, pricing: context.fingerprint, configuredEndpoints });
 }
