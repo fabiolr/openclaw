@@ -6,6 +6,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { normalizeManifestModelPricing } from "../plugins/manifest-model-provider-normalizers.js";
 import * as pluginMetadata from "../plugins/plugin-metadata-snapshot.js";
 import { resetUsageFormatCachesForTest, resolveModelCostConfig } from "../utils/usage-format.js";
+import { resolveModelPricing, resolveModelPricingContext } from "./pricing.js";
 import { setRemoteModelCatalogOverlaySourcesForTest } from "./remote-overlay.test-support.js";
 
 const tempDirs = useAutoCleanupTempDirTracker(afterEach);
@@ -50,20 +51,22 @@ describe("OpenRouter routing shortcut estimates", () => {
     (suffix) => {
       const agentDir = tempDirs.make("openclaw-routing-pricing-");
       const model = `openai/gpt-catalog:${suffix}`;
-      const rates = { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 };
+      const rates = { input: 1, output: 2 };
       const entry: ModelDefinitionConfig = {
         id: model,
         name: "Routing shortcut",
         reasoning: false,
         input: ["text"],
-        cost: {},
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
         maxTokens: 8192,
       };
       const configWith = (baseUrl: string, modelEntry = entry): OpenClawConfig => ({
         models: { providers: { openrouter: { baseUrl, models: [modelEntry] } } },
       });
-      const resolve = (config: OpenClawConfig) =>
-        resolveModelCostConfig({ config, agentDir, provider: "openrouter", model });
+      const resolve = (config: OpenClawConfig) => {
+        const context = resolveModelPricingContext(config);
+        return resolveModelPricing(context, context.normalizeKey("openrouter", model));
+      };
       expect(resolve(configWith("https://openrouter.ai/api/v1"))).toEqual(rates);
       expect(
         resolve({
@@ -80,8 +83,7 @@ describe("OpenRouter routing shortcut estimates", () => {
           },
         }),
       ).toEqual(rates);
-      const unpriced = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
-      expect(resolve(configWith("http://127.0.0.1:8080/v1"))).toEqual(unpriced);
+      expect(resolve(configWith("http://127.0.0.1:8080/v1"))).toBeUndefined();
       expect(
         resolve(
           configWith("https://openrouter.ai/api/v1", {
@@ -89,12 +91,17 @@ describe("OpenRouter routing shortcut estimates", () => {
             baseUrl: "http://127.0.0.1:8080/v1",
           }),
         ),
-      ).toEqual(unpriced);
+      ).toBeUndefined();
       for (const input of [0, 9]) {
         const cost = { input, output: input, cacheRead: 0, cacheWrite: 0 };
-        expect(resolve(configWith("https://openrouter.ai/api/v1", { ...entry, cost }))).toEqual(
-          cost,
-        );
+        expect(
+          resolveModelCostConfig({
+            config: configWith("https://openrouter.ai/api/v1", { ...entry, cost }),
+            agentDir,
+            provider: "openrouter",
+            model,
+          }),
+        ).toEqual(cost);
       }
     },
   );
